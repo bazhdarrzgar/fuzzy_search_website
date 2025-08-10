@@ -381,6 +381,52 @@ export default function App() {
             prepared: searchableFields
           }
         })
+      },
+
+      ufuzzy: () => {
+        const uf = new uFuzzy()
+        const haystack = baseRows.map(row => 
+          columns.map(col => String(row[col] || '')).join(' ')
+        )
+        return { uf, haystack }
+      },
+
+      fuzzysearch: () => {
+        // Simple implementation using fuzzysearch
+        return baseRows.map((row, idx) => ({
+          index: idx,
+          row,
+          searchText: columns.map(col => String(row[col] || '')).join(' ')
+        }))
+      },
+
+      fuzzy: () => {
+        // Prepare data for fuzzy.js
+        const options = {
+          extract: (row) => columns.map(col => String(row[col] || '')).join(' ')
+        }
+        return { data: baseRows, options }
+      },
+
+      microfuzz: () => {
+        // Simple microfuzz implementation
+        const haystack = baseRows.map((row, idx) => ({
+          index: idx,
+          row,
+          searchText: columns.map(col => String(row[col] || '')).join(' ').toLowerCase()
+        }))
+        return haystack
+      },
+
+      meilisearch: () => {
+        // For client-side usage, we'll implement a simple search similar to other engines
+        // Note: MeiliSearch is typically a server-side search engine
+        const documents = baseRows.map((row, idx) => ({
+          id: idx,
+          searchText: columns.map(col => String(row[col] || '')).join(' '),
+          ...row
+        }))
+        return documents
       }
     }
   }, [baseRows, active?.columns, searchColumns, caseSensitive, exact])
