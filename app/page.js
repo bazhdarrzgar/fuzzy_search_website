@@ -1499,6 +1499,24 @@ export default function App() {
                             <span className="text-xs text-muted-foreground">Instant full-text search (client-side mode)</span>
                           </div>
                         </SelectItem>
+                        <SelectItem value="matchsorter">
+                          <div className="flex flex-col">
+                            <span className="font-medium">Match Sorter</span>
+                            <span className="text-xs text-muted-foreground">Simple, expected, and deterministic best-match sorting</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="fastfuzzy">
+                          <div className="flex flex-col">
+                            <span className="font-medium">Fast Fuzzy</span>
+                            <span className="text-xs text-muted-foreground">Very fast fuzzy string matching with advanced options</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="stringsimilarity">
+                          <div className="flex flex-col">
+                            <span className="font-medium">String Similarity</span>
+                            <span className="text-xs text-muted-foreground">Finds degree of similarity between strings (Dice coefficient)</span>
+                          </div>
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
