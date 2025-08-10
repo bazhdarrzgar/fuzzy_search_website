@@ -607,6 +607,58 @@ export default function App() {
           })
           return results.map(doc => baseRows[doc.id]).filter(Boolean)
         }
+
+        case 'matchsorter': {
+          const data = searchEngines.matchsorter()
+          const results = matchSorter(data, query, {
+            keys: ['searchableText'],
+            threshold: exact ? matchSorter.rankings.EQUAL : matchSorter.rankings.CONTAINS
+          })
+          return results.map(r => r.row)
+        }
+
+        case 'fastfuzzy': {
+          const data = searchEngines.fastfuzzy()
+          const results = []
+          
+          data.forEach(item => {
+            const options = {
+              ignoreCase: !caseSensitive,
+              returnMatchData: true
+            }
+            const result = fastFuzzySearch(query, [item.searchText], options)
+            if (result.length > 0) {
+              results.push({
+                item,
+                score: result[0].score || 0
+              })
+            }
+          })
+          
+          results.sort((a, b) => b.score - a.score)
+          return results.map(r => r.item.row)
+        }
+
+        case 'stringsimilarity': {
+          const data = searchEngines.stringsimilarity()
+          const results = []
+          
+          data.forEach(item => {
+            const text = caseSensitive ? item.searchText : item.searchText.toLowerCase()
+            const needle = caseSensitive ? query : query.toLowerCase()
+            const similarity = stringSimilarity.compareTwoStrings(needle, text)
+            
+            if (similarity > 0.1 || text.includes(needle)) { // threshold for relevance
+              results.push({
+                item,
+                similarity
+              })
+            }
+          })
+          
+          results.sort((a, b) => b.similarity - a.similarity)
+          return results.map(r => r.item.row)
+        }
         
         default:
           return baseRows
