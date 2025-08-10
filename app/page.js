@@ -509,6 +509,74 @@ export default function App() {
           results.sort((a, b) => b.score - a.score)
           return results.map(r => r.item)
         }
+
+        case 'ufuzzy': {
+          const { uf, haystack } = searchEngines.ufuzzy()
+          const idxs = uf.filter(haystack, query)
+          if (idxs?.length) {
+            const info = uf.info(idxs, haystack, query)
+            const order = uf.sort(info, haystack, query)
+            return order.map(i => baseRows[idxs[i]]).filter(Boolean)
+          }
+          return []
+        }
+
+        case 'fuzzysearch': {
+          const searchData = searchEngines.fuzzysearch()
+          const results = searchData.filter(item => {
+            const needle = caseSensitive ? query : query.toLowerCase()
+            const haystack = caseSensitive ? item.searchText : item.searchText.toLowerCase()
+            return fuzzysearch(needle, haystack)
+          })
+          return results.map(r => r.row)
+        }
+
+        case 'fuzzy': {
+          const { data, options } = searchEngines.fuzzy()
+          const results = fuzzy.filter(query, data, options)
+          return results.map(r => r.original)
+        }
+
+        case 'microfuzz': {
+          const haystack = searchEngines.microfuzz()
+          const needle = caseSensitive ? query : query.toLowerCase()
+          const results = []
+          
+          // Simple fuzzy matching implementation
+          haystack.forEach(item => {
+            const text = caseSensitive ? item.searchText : item.searchText.toLowerCase()
+            let score = 0
+            let lastIndex = -1
+            let matches = 0
+            
+            for (let i = 0; i < needle.length; i++) {
+              const char = needle[i]
+              const index = text.indexOf(char, lastIndex + 1)
+              if (index !== -1) {
+                matches++
+                score += needle.length - (index - lastIndex)
+                lastIndex = index
+              }
+            }
+            
+            if (matches === needle.length || text.includes(needle)) {
+              results.push({ ...item, score })
+            }
+          })
+          
+          results.sort((a, b) => b.score - a.score)
+          return results.map(r => r.row)
+        }
+
+        case 'meilisearch': {
+          const documents = searchEngines.meilisearch()
+          const needle = caseSensitive ? query : query.toLowerCase()
+          const results = documents.filter(doc => {
+            const text = caseSensitive ? doc.searchText : doc.searchText.toLowerCase()
+            return text.includes(needle)
+          })
+          return results.map(doc => baseRows[doc.id]).filter(Boolean)
+        }
         
         default:
           return baseRows
