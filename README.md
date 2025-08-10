@@ -1,43 +1,101 @@
-# Excel Explorer
+# Excel Explorer - Advanced Fuzzy Search
 
-Upload, explore, filter, pivot, and export Excel (XLSX) files entirely in your browser. Save views and metadata to MongoDB. Includes fuzzy search, column tools (show/hide, pin, reorder, resize), virtual scrolling for large data, data cleaning helpers, history (uploads and searches), and shareable views.
+Upload, explore, filter, pivot, and export Excel (XLSX) files entirely in your browser. Features **13 different fuzzy search engines** for optimal search performance, column tools, virtual scrolling for large datasets, data cleaning helpers, MongoDB storage for views and history, and shareable views.
+
+## 🔍 Search Engines (13 Available)
+
+Choose from 13 different search engines, each optimized for specific use cases:
+
+### **High-Performance Engines**
+- **🚀 uFuzzy** - Ultra-fast fuzzy search with typo tolerance and advanced scoring
+- **⚡ Fast Fuzzy** - Very fast fuzzy string matching with advanced options and Unicode support
+- **🏃 FlexSearch** - Extremely fast, supports phonetic and partial matching
+
+### **Comprehensive Full-Text Search**
+- **📚 Fuse.js** - Token + character scoring, configurable weights per field, most popular
+- **🔎 MiniSearch** - Full-text search with fuzzy matching, relevance ranking, and BM25 scoring
+- **📖 Lunr.js** - Search index with tf-idf scoring, excellent for full-text search
+
+### **Specialized Fuzzy Matching**
+- **🎯 FuzzySort** - Very fast fuzzy string matching (RapidFuzz-like performance)
+- **🪶 FuzzySearch** - Simple and lightweight fuzzy string searching
+- **📝 Fuzzy.js** - Simple fuzzy filter for arrays of strings
+- **🔬 MicroFuzz** - Minimal fuzzy search implementation (custom built)
+
+### **Advanced Matching Algorithms**
+- **🎲 Match Sorter** - Simple, expected, and deterministic best-match sorting
+- **📊 String Similarity** - Finds degree of similarity between strings using Dice coefficient
+- **⚡ MeiliSearch** - Instant full-text search engine (client-side mode)
 
 ## Quick Start
 
-1. Environment
+1. **Environment Setup**
 
 Create/update .env (already present) with:
 
-- MONGO_URL=mongodb://localhost:27017
-- DB_NAME=excel_explorer   # pick a DB name you want
-- NEXT_PUBLIC_BASE_URL=... # provided by platform
+```env
+MONGO_URL=mongodb://localhost:27017
+DB_NAME=excel_explorer
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
+```
 
-2. Run
+2. **Run the Application**
 
 The platform runs Next.js dev server under supervisor. If you changed .env, restart:
 
-sudo supervisorctl restart nextjs
+```bash
+sudo supervisorctl restart frontend
+```
 
 Open http://localhost:3000
 
 ## Key Features
 
-- Upload & Preview: drag-and-drop or file picker. Multi-sheet with tabs.
-- Fuzzy Search: Fuse.js across all or selected columns, exact/case toggles, highlight matches.
-- Filters: Filter Builder with AND/OR and rich operators (equals, contains, between, is empty, etc.).
-- Column Tools:
-  - Show/Hide columns
-  - Pin columns to render first
-  - Drag-and-drop column reordering (dnd-kit)
-  - Resizable column widths (persisted in views)
-- Sorting: Click headers.
-- Pagination or Virtual Scroll: automatic virtualization for large datasets.
-- Export: filtered rows to CSV/XLSX.
-- Views: Save/Load views to MongoDB (name required). Update, inline rename, delete.
-- Quick Insights: per-column stats + frequency bar chart.
-- Data Cleaning: trim whitespace, detect basic types, remove duplicates by columns.
-- History: upload history and search history with clear and CSV export.
-- Share View Links: generate share slug and copy ?view=slug link (no auth yet).
+### **📊 Data Management**
+- **Upload & Preview**: Drag-and-drop or file picker with multi-sheet support and tabs
+- **Export Options**: Export filtered data to CSV/XLSX formats
+- **Virtual Scrolling**: Automatic virtualization for large datasets (1000+ rows)
+- **Multi-Sheet Support**: Handle Excel files with multiple worksheets
+
+### **🔍 Advanced Search & Filtering**
+- **13 Search Engines**: Choose the best search algorithm for your data
+- **Smart Search Options**: 
+  - Exact match vs fuzzy matching
+  - Case sensitive/insensitive search
+  - Search specific columns or all columns
+  - Real-time search with highlighting
+- **Advanced Filters**: Filter Builder with AND/OR logic and rich operators:
+  - Equals, contains, between, is empty, greater than, less than, etc.
+
+### **🛠️ Column Management Tools**
+- **Show/Hide Columns**: Toggle column visibility
+- **Pin Columns**: Pin important columns to render first
+- **Drag-and-Drop Reordering**: Reorder columns using dnd-kit
+- **Resizable Columns**: Adjust column widths (persisted in views)
+- **Column Statistics**: Quick insights with frequency charts
+
+### **💾 Data Persistence & Views**
+- **Save/Load Views**: Store complete view configurations in MongoDB
+- **View Management**: Update, rename, delete saved views
+- **Shareable Views**: Generate share slugs for collaborative access
+- **History Tracking**: 
+  - Upload history with file metadata
+  - Search history with query tracking
+  - Export history to CSV
+
+### **🧹 Data Cleaning Tools**
+- **Whitespace Trimming**: Remove leading/trailing spaces
+- **Type Detection**: Automatically detect and convert data types
+- **Duplicate Removal**: Remove duplicates based on selected columns
+- **Case Conversion**: Convert text to uppercase/lowercase
+- **Empty Row Removal**: Clean up empty data rows
+
+### **⚡ Performance Features**
+- **Bulk Operations**: Select, delete, duplicate multiple rows
+- **Sorting**: Click column headers to sort data
+- **Pagination**: Navigate large datasets efficiently  
+- **Cell Editing**: In-place editing of cell values
+- **Export Selected**: Export only selected rows
 
 ## API Endpoints (all under /api)
 
