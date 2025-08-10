@@ -430,6 +430,33 @@ export default function App() {
           ...row
         }))
         return documents
+      },
+
+      matchsorter: () => {
+        // Prepare data for match-sorter
+        return baseRows.map((row, idx) => ({
+          index: idx,
+          row,
+          searchableText: columns.map(col => String(row[col] || '')).join(' ')
+        }))
+      },
+
+      fastfuzzy: () => {
+        // Prepare haystack for fast-fuzzy search
+        return baseRows.map((row, idx) => ({
+          index: idx,
+          row,
+          searchText: columns.map(col => String(row[col] || '')).join(' ')
+        }))
+      },
+
+      stringsimilarity: () => {
+        // Prepare data for string-similarity
+        return baseRows.map((row, idx) => ({
+          index: idx,
+          row,
+          searchText: columns.map(col => String(row[col] || '')).join(' ')
+        }))
       }
     }
   }, [baseRows, active?.columns, searchColumns, caseSensitive, exact])
