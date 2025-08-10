@@ -1387,6 +1387,36 @@ export default function App() {
                             <span className="text-xs text-muted-foreground">Very fast fuzzy string matching (RapidFuzz-like performance)</span>
                           </div>
                         </SelectItem>
+                        <SelectItem value="ufuzzy">
+                          <div className="flex flex-col">
+                            <span className="font-medium">uFuzzy</span>
+                            <span className="text-xs text-muted-foreground">Ultra-fast fuzzy search with typo tolerance</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="fuzzysearch">
+                          <div className="flex flex-col">
+                            <span className="font-medium">FuzzySearch</span>
+                            <span className="text-xs text-muted-foreground">Simple and lightweight fuzzy string searching</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="fuzzy">
+                          <div className="flex flex-col">
+                            <span className="font-medium">Fuzzy.js</span>
+                            <span className="text-xs text-muted-foreground">Simple fuzzy filter for arrays of strings</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="microfuzz">
+                          <div className="flex flex-col">
+                            <span className="font-medium">MicroFuzz</span>
+                            <span className="text-xs text-muted-foreground">Minimal fuzzy search implementation</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="meilisearch">
+                          <div className="flex flex-col">
+                            <span className="font-medium">MeiliSearch</span>
+                            <span className="text-xs text-muted-foreground">Instant full-text search (client-side mode)</span>
+                          </div>
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
