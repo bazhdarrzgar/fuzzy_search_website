@@ -97,77 +97,219 @@ Open http://localhost:3000
 - **Cell Editing**: In-place editing of cell values
 - **Export Selected**: Export only selected rows
 
-## API Endpoints (all under /api)
+## API Endpoints
 
-Views
-- GET /api/views — list views (without _id)
-- POST /api/views — create view
-- GET /api/views/:id — get single view
-- PUT /api/views/:id — update view fields
-- DELETE /api/views/:id — delete view
-- GET /api/views/share/:slug — fetch a shared view by slug
+All API endpoints are under `/api` prefix:
 
-History
-- GET /api/history/upload — list recent uploads
-- POST /api/history/upload — add upload record
-- DELETE /api/history/upload — clear upload history
-- GET /api/history/search — list recent searches
-- POST /api/history/search — add search record
-- DELETE /api/history/search — clear search history
+### **Views Management**
+- `GET /api/views` — List all views (without _id)
+- `POST /api/views` — Create new view
+- `GET /api/views/:id` — Get single view by ID
+- `PUT /api/views/:id` — Update view fields
+- `DELETE /api/views/:id` — Delete view
+- `GET /api/views/share/:slug` — Fetch shared view by slug
 
-Status (sample)
-- GET /api/root or GET /api/ — Hello World
-- GET/POST /api/status — sample health endpoints
+### **History Tracking**
+- `GET /api/history/upload` — List recent uploads
+- `POST /api/history/upload` — Add upload record
+- `DELETE /api/history/upload` — Clear upload history
+- `GET /api/history/search` — List recent searches
+- `POST /api/history/search` — Add search record
+- `DELETE /api/history/search` — Clear search history
+
+### **Status & Health**
+- `GET /api/root` or `GET /api/` — Hello World
+- `GET/POST /api/status` — Health check endpoints
 
 ## Data Model (MongoDB)
 
-- views
-  - id (uuid)
-  - name, fileName, sheet
-  - columns, visibleColumns, pinnedColumns, searchColumns
-  - filterBuilder: { groupOperator, filters[] }
-  - pivot: { g1, g2, measure, agg }
-  - columnWidths: { [column]: number(px) }
-  - query, caseSensitive, exact, sortBy, sortDir
-  - virtualizeEnabled
-  - shareSlug (optional)
-  - createdAt (Date)
+### **Views Collection**
+```javascript
+{
+  id: "uuid",
+  name: "string",
+  fileName: "string", 
+  sheet: "string",
+  columns: ["array of column names"],
+  visibleColumns: ["array"],
+  pinnedColumns: ["array"],
+  searchColumns: ["array"],
+  searchEngine: "string", // Selected search engine
+  filterBuilder: {
+    groupOperator: "AND|OR",
+    filters: [...]
+  },
+  pivot: {
+    g1: "string", 
+    g2: "string", 
+    measure: "string", 
+    agg: "string"
+  },
+  columnWidths: {
+    "columnName": "number (pixels)"
+  },
+  query: "string",
+  caseSensitive: "boolean",
+  exact: "boolean",
+  sortBy: "string",
+  sortDir: "asc|desc",
+  virtualizeEnabled: "boolean",
+  shareSlug: "string (optional)",
+  createdAt: "Date"
+}
+```
 
-- upload_history
-  - id (uuid)
-  - fileName
-  - totalRows, sheetCount
-  - sheets: [{ name, rowCount, colCount }]
-  - createdAt (Date)
+### **Upload History Collection**
+```javascript
+{
+  id: "uuid",
+  fileName: "string",
+  totalRows: "number",
+  sheetCount: "number", 
+  sheets: [{
+    name: "string",
+    rowCount: "number",
+    colCount: "number"
+  }],
+  createdAt: "Date"
+}
+```
 
-- search_history
-  - id (uuid)
-  - query, caseSensitive, exact, searchColumns[], sheet, fileName
-  - createdAt (Date)
+### **Search History Collection**
+```javascript
+{
+  id: "uuid",
+  query: "string",
+  caseSensitive: "boolean",
+  exact: "boolean", 
+  searchColumns: ["array"],
+  searchEngine: "string",
+  sheet: "string",
+  fileName: "string",
+  createdAt: "Date"
+}
+```
 
-## Per-View “Load Last Used File”
+## Search Engine Performance Comparison
 
-When you apply a saved view that references a different fileName than the one currently loaded, the UI prompts you to select that file from your device. This is required because browsers cannot auto-load local files without user interaction. After you select the expected file, the app parses it and reapplies the view.
+| Engine | Speed | Memory | Fuzzy Quality | Best For |
+|--------|-------|---------|---------------|----------|
+| uFuzzy | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | Large datasets, typo tolerance |
+| Fast Fuzzy | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | Unicode text, fast results |
+| FlexSearch | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | Phonetic matching |
+| FuzzySort | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | Simple fuzzy matching |
+| Fuse.js | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | Configurable, weighted search |
+| MiniSearch | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | Full-text with BM25 |
+| Match Sorter | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | Deterministic sorting |
+| String Similarity | ⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | Similarity scoring |
 
-## Notes
+## Advanced Features
 
-- If MongoDB is unreachable or DB_NAME is not set, client-side features still work (upload, preview, search, export), but saving/loading views and history will fail silently or show toasts.
-- IDs are UUIDs, not ObjectIDs, to keep responses JSON-friendly.
-- No external file storage is implemented; files remain client-side.
+### **Per-View File Loading**
+When applying a saved view that references a different file, the UI prompts you to select the expected file from your device. This maintains view compatibility across different datasets.
 
-## Roadmap Ideas
+### **Smart Search Features**
+- **Column-specific search**: Limit search to selected columns
+- **Search highlighting**: Visual highlighting of matched terms
+- **Search history**: Track and reuse previous queries
+- **Real-time search**: Instant results as you type
 
-- Stable row keys by selecting a unique column per sheet (improves selection across pages)
-- Advanced pivot builder with columns-as-headers
-- Auth + per-user history and views
-- Bulk transformation recipes and undo stack
+### **Data Cleaning Pipeline**
+1. **Trim whitespace** from all text fields
+2. **Detect and convert** data types automatically  
+3. **Remove duplicates** based on selected columns
+4. **Case conversion** (upper/lower case)
+5. **Empty row removal**
+
+## Technical Notes
+
+- **Client-side Processing**: Files remain in browser memory, no server storage
+- **UUID-based IDs**: All identifiers are UUIDs for JSON compatibility
+- **MongoDB Optional**: Core features work without database connection
+- **Responsive Design**: Works on desktop, tablet, and mobile devices
+- **Performance Optimized**: Virtual scrolling for datasets with 1000+ rows
 
 ## Tech Stack
 
-- Next.js (App Router), React 18, Tailwind + shadcn/ui
-- SheetJS (xlsx) for parsing and export
-- Fuse.js for fuzzy search
-- @tanstack/react-virtual for virtualization
-- @dnd-kit for drag-and-drop
-- Recharts for quick insights
-- MongoDB for view/history metadata
+### **Frontend**
+- **Next.js 14** (App Router) - React framework
+- **React 18** - UI library with hooks and context
+- **Tailwind CSS + shadcn/ui** - Styling and components
+- **@tanstack/react-virtual** - Virtual scrolling for performance
+- **@dnd-kit** - Drag-and-drop functionality
+- **Recharts** - Data visualization and quick insights
+
+### **Search Libraries**
+- **13 Search Engines** - Comprehensive search capabilities:
+  - Fuse.js, MiniSearch, FlexSearch, Lunr.js, FuzzySort
+  - uFuzzy, FuzzySearch, Fuzzy.js, MicroFuzz
+  - Match Sorter, Fast Fuzzy, String Similarity, MeiliSearch
+
+### **Data Processing**
+- **SheetJS (xlsx)** - Excel file parsing and export
+- **MongoDB** - View and history metadata storage
+
+### **Development**
+- **TypeScript** - Type safety (where applicable)
+- **ESLint** - Code linting
+- **Yarn** - Package management
+
+## Performance Recommendations
+
+### **For Small Datasets (< 1,000 rows)**
+- **Fuse.js**: Best overall fuzzy search experience
+- **Match Sorter**: Simple and predictable results
+- **String Similarity**: For similarity-based ranking
+
+### **For Medium Datasets (1,000 - 10,000 rows)**  
+- **uFuzzy**: Excellent performance with typo tolerance
+- **Fast Fuzzy**: Great Unicode support and speed
+- **FlexSearch**: Fast with phonetic matching
+
+### **For Large Datasets (> 10,000 rows)**
+- **uFuzzy**: Top choice for large datasets
+- **FlexSearch**: Extremely fast indexing
+- **FuzzySort**: Minimal memory footprint
+
+## Development & Deployment
+
+### **Local Development**
+```bash
+# Install dependencies
+yarn install
+
+# Start development server
+yarn dev
+
+# The app will be available at http://localhost:3000
+```
+
+### **Environment Variables**
+```env
+MONGO_URL=mongodb://localhost:27017
+DB_NAME=excel_explorer
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
+```
+
+### **Production Deployment**
+- Built for serverless and traditional hosting
+- MongoDB connection required for view persistence
+- Static file serving for optimal performance
+
+## Roadmap
+
+### **Planned Features**
+- **Stable row keys** by selecting unique column per sheet
+- **Advanced pivot builder** with columns-as-headers
+- **User authentication** + per-user history and views  
+- **Bulk transformation recipes** with undo/redo stack
+- **Real-time collaboration** on shared views
+- **Advanced data visualization** with charts and graphs
+- **Export to more formats** (JSON, PDF, etc.)
+- **API integrations** for external data sources
+
+### **Performance Improvements**
+- **Web Workers**: Move search processing to background threads
+- **Streaming**: Support for very large files (100MB+)
+- **Caching**: Intelligent caching of search results
+- **Progressive loading**: Load data incrementally
