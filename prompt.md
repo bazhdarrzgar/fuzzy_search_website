@@ -1,0 +1,1 @@
+1. please create upload_github.sh file that will upload the current project to github, but remember to for .gitignore that it should gitignore node_modules folder and .next folder or other file that is not needed for the project.

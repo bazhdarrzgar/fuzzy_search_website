@@ -41,13 +41,26 @@ NEXT_PUBLIC_BASE_URL=http://localhost:3000
 
 2. **Run the Application**
 
-The platform runs Next.js dev server under supervisor. If you changed .env, restart:
+The platform includes a cross-platform launcher for both Windows and Linux.
 
+**Windows:**
+1. Open the `Run` folder.
+2. Double-click `install_requirements.bat` (only the first time).
+3. Double-click `launcher.bat` to open the Control Panel.
+
+**Linux:**
+1. Open the terminal in the project directory.
+2. Run `./Run/install_requirements.sh` (only the first time).
+3. Run `./Run/launcher.sh` to open the Control Panel.
+
+Alternatively, you can use the standard commands:
 ```bash
-sudo supervisorctl restart frontend
+npm install
+npm run dev
 ```
 
-Open http://localhost:3000
+Open http://localhost:3000 (or the port shown in the Control Panel)
+
 
 ## Key Features
 
