@@ -2,18 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
-import Fuse from 'fuse.js'
-import MiniSearch from 'minisearch'
-import FlexSearch from 'flexsearch'
-import lunr from 'lunr'
-import fuzzysort from 'fuzzysort'
-import uFuzzy from '@leeoniya/ufuzzy'
-import fuzzysearch from 'fuzzysearch'
-import fuzzy from 'fuzzy'
-import { MeiliSearch } from 'meilisearch'
-import { matchSorter } from 'match-sorter'
-import { search as fastFuzzySearch } from 'fast-fuzzy'
-import stringSimilarity from 'string-similarity'
+import searchService from '@/lib/search-service'
 import { useTheme } from 'next-themes'
 import { Columns3, Download, FileUp, Loader2, Save, Search, SlidersHorizontal, Table as TableIcon, Trash2, GripVertical, Pencil, Check, X as XIcon, RefreshCw, Link as LinkIcon, History as HistoryIcon, Sun, Moon, Monitor, Eye, Copy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -33,6 +22,11 @@ import { DndContext, MouseSensor, TouchSensor, useSensor, useSensors, closestCen
 import { arrayMove, SortableContext, useSortable, rectSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts'
+import { storage, serverBackup } from '@/lib/storage'
+import { Database, RotateCcw, CloudUpload, FileCheck, FileArchive, File as FileIcon } from 'lucide-react'
+import JSZip from 'jszip'
+import { saveAs } from 'file-saver'
+import ExcelJS from 'exceljs'
 
 const PAGE_SIZE = 50
 const VIRTUAL_ROW_HEIGHT = 36
@@ -45,7 +39,10 @@ const readFileAsArrayBuffer = (file) => new Promise((resolve, reject) => {
   reader.readAsArrayBuffer(file)
 })
 
-const buildRows = (sheet) => XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
+const buildRows = (sheet) => {
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
+  return rows.map((r, i) => ({ ...r, __rowNum: i + 2 })) // Assuming row 1 is header
+}
 const buildColumns = (rows) => Object.keys(rows?.[0] || {})
 
 const highlightMatch = (text, query) => {
@@ -93,21 +90,221 @@ export default function App() {
   // Theme
   const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
+  const [isRestoring, setIsRestoring] = useState(false)
+  const [lastBackupTime, setLastBackupTime] = useState(null)
 
   // Core state
-  const [fileName, setFileName] = useState('')
-  const [sheets, setSheets] = useState([])
+  const [mainTab, setMainTab] = useState('single')
+  const [loadedFiles, setLoadedFiles] = useState([])
+  const [activeFileId, setActiveFileId] = useState('')
   const [activeSheet, setActiveSheet] = useState('')
 
+  // Persistence Effects
+  useEffect(() => {
+    const restoreSession = async () => {
+      setIsRestoring(true)
+      try {
+        const savedData = await storage.load('lastSession')
+        if (savedData && savedData.loadedFiles?.length > 0) {
+          setLoadedFiles(savedData.loadedFiles)
+          setActiveFileId(savedData.activeFileId || '')
+          setActiveSheet(savedData.activeSheet || '')
+          toast.success('Previous session restored')
+        }
+      } catch (err) {
+        console.error('Failed to restore session:', err)
+      } finally {
+        setIsRestoring(false)
+      }
+    }
+    restoreSession()
+  }, [])
+
+  useEffect(() => {
+    if (mounted && !isRestoring && loadedFiles.length > 0) {
+      const timer = setTimeout(() => {
+        storage.save('lastSession', {
+          loadedFiles,
+          activeFileId,
+          activeSheet,
+          timestamp: new Date().toISOString()
+        })
+      }, 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [loadedFiles, activeFileId, activeSheet, mounted, isRestoring])
+
+  const handleBackupToServer = async () => {
+    if (loadedFiles.length === 0) {
+      toast.error('No data to backup')
+      return
+    }
+
+    const toastId = toast.loading('Creating server backup...')
+    try {
+      const result = await serverBackup(fileName || 'bulk_backup', {
+        loadedFiles,
+        activeFileId,
+        activeSheet
+      })
+
+      if (result.ok) {
+        setLastBackupTime(new Date())
+        toast.success(`Backup saved to: ${result.path}`, { id: toastId })
+      } else {
+        throw new Error(result.error)
+      }
+    } catch (err) {
+      toast.error('Backup failed: ' + err.message, { id: toastId })
+    }
+  }
+
+  const clearSession = async () => {
+    if (confirm('Are you sure you want to clear the current session and all loaded files?')) {
+      await storage.clear()
+      setLoadedFiles([])
+      setActiveFileId('')
+      setActiveSheet('')
+      toast.success('Session cleared')
+    }
+  }
+
+  const activeFile = useMemo(() => loadedFiles.find(f => f.id === activeFileId), [loadedFiles, activeFileId])
+  const sheets = useMemo(() => activeFile ? activeFile.sheets : [], [activeFile])
+  const fileName = useMemo(() => activeFile ? activeFile.name : '', [activeFile])
+
+  const setSheets = (newSheets) => {
+    if (!activeFileId) return;
+    setLoadedFiles(prev => prev.map(f => f.id === activeFileId ? { 
+      ...f, 
+      sheets: typeof newSheets === 'function' ? newSheets(f.sheets) : newSheets,
+      modified: true 
+    } : f))
+  }
+  const setFileName = (newName) => {
+    if (!activeFileId) return;
+    setLoadedFiles(prev => prev.map(f => f.id === activeFileId ? { ...f, name: newName } : f))
+  }
+  
+  const active = useMemo(() => sheets.find(s => s.name === activeSheet), [sheets, activeSheet])
+  const baseRows = useMemo(() => (active?.rows || []), [active?.rows])
+
+  
   // Search/Filter/Sort
   const [query, setQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [exact, setExact] = useState(false)
   const [searchColumns, setSearchColumns] = useState([])
-  const [searchEngine, setSearchEngine] = useState('fuse') // New state for search engine
+  const [searchEngine, setSearchEngine] = useState('fuse') // Shared between single and global
+
+  // Global search state
+  const [globalQuery, setGlobalQuery] = useState('')
+  const [globalResults, setGlobalResults] = useState([])
+  const [globalActiveFileId, setGlobalActiveFileId] = useState('')
+  const [isGlobalSearching, setIsGlobalSearching] = useState(false)
+
+  useEffect(() => {
+    if (!globalQuery.trim() || loadedFiles.length === 0) {
+      setGlobalResults([]);
+      setGlobalActiveFileId('');
+      return;
+    }
+    setIsGlobalSearching(true);
+    
+    const t = setTimeout(async () => {
+      try {
+        const tasks = [];
+        const taskMap = [];
+
+        loadedFiles.forEach(file => {
+          file.sheets.forEach(sheet => {
+            tasks.push({
+              engine: searchEngine,
+              query: globalQuery,
+              rows: sheet.rows,
+              columns: sheet.columns,
+              exact,
+              caseSensitive
+            });
+            taskMap.push({ fileId: file.id, fileName: file.name, sheetName: sheet.name, columns: sheet.columns });
+          });
+        });
+
+        const allMatches = await searchService.parallelSearch(tasks);
+        const resultsByFileMap = new Map();
+
+        allMatches.forEach((matches, index) => {
+          if (matches.length > 0) {
+            const { fileId, fileName, sheetName, columns } = taskMap[index];
+            if (!resultsByFileMap.has(fileId)) {
+              resultsByFileMap.set(fileId, { fileId, fileName, sheets: [] });
+            }
+            resultsByFileMap.get(fileId).sheets.push({
+              sheetName,
+              matches,
+              columns
+            });
+          }
+        });
+
+        const resultsByFile = Array.from(resultsByFileMap.values());
+        setGlobalResults(resultsByFile);
+        if (resultsByFile.length > 0 && (!globalActiveFileId || !resultsByFile.find(f => f.fileId === globalActiveFileId))) {
+          setGlobalActiveFileId(resultsByFile[0].fileId);
+        }
+      } catch (err) {
+        console.error('Global search error:', err);
+        toast.error('Global search failed');
+      } finally {
+        setIsGlobalSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [globalQuery, loadedFiles, searchEngine, exact, caseSensitive]);
+
   const [sortBy, setSortBy] = useState('')
   const [sortDir, setSortDir] = useState('asc')
   const [page, setPage] = useState(1)
+  const [isSearching, setIsSearching] = useState(false)
+  const [filtered, setFiltered] = useState([])
+
+  useEffect(() => {
+    if (!baseRows.length) {
+      setFiltered([])
+      return
+    }
+    if (!query) {
+      setFiltered(baseRows)
+      return
+    }
+    
+    setIsSearching(true)
+    const t = setTimeout(async () => {
+      try {
+        const results = await searchService.search({
+          engine: searchEngine,
+          query,
+          rows: baseRows,
+          columns: searchColumns?.length ? searchColumns : active?.columns,
+          exact,
+          caseSensitive
+        })
+        setFiltered(results)
+      } catch (err) {
+        console.error('Search error:', err)
+        setFiltered(baseRows)
+      } finally {
+        setIsSearching(false)
+      }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [baseRows, query, searchEngine, searchColumns, active?.columns, exact, caseSensitive])
+
+  useEffect(() => {
+    return () => {
+      searchService.terminate()
+    }
+  }, [])
 
   // Views
   const [saving, setSaving] = useState(false)
@@ -255,7 +452,7 @@ export default function App() {
   const fileInputRef = useRef(null)
   const bodyContainerRef = useRef(null)
 
-  const active = useMemo(() => sheets.find(s => s.name === activeSheet), [sheets, activeSheet])
+
 
   // Theme mounting effect
   useEffect(() => {
@@ -291,389 +488,9 @@ export default function App() {
     }
   }, [active?.columns])
 
-  const baseRows = useMemo(() => (active?.rows || []), [active?.rows])
+
 
   // Search engines setup
-  const searchEngines = useMemo(() => {
-    if (!baseRows.length || !active?.columns) return null
-    
-    const columns = searchColumns?.length ? searchColumns : active.columns
-    
-    return {
-      fuse: () => {
-        const keys = columns.map(k => ({ name: k, weight: 1 }))
-        return new Fuse(baseRows, {
-          keys,
-          includeMatches: true,
-          threshold: exact ? 0.0 : 0.4,
-          isCaseSensitive: caseSensitive,
-          ignoreLocation: true,
-          minMatchCharLength: 1,
-          useExtendedSearch: exact,
-        })
-      },
-      
-      minisearch: () => {
-        const ms = new MiniSearch({
-          fields: columns,
-          storeFields: columns,
-          searchOptions: {
-            fuzzy: !exact,
-            prefix: true,
-            boost: {},
-            weights: { fuzzy: 0.2, prefix: 0.8 }
-          }
-        })
-        
-        const documentsWithId = baseRows.map((row, index) => ({
-          id: index,
-          ...row
-        }))
-        
-        ms.addAll(documentsWithId)
-        return ms
-      },
-      
-      flexsearch: () => {
-        const index = new FlexSearch.Index({
-          charset: "latin:extra",
-          tokenize: "forward",
-          resolution: 9
-        })
-        
-        baseRows.forEach((row, idx) => {
-          const searchText = columns
-            .map(col => String(row[col] || ''))
-            .join(' ')
-          index.add(idx, searchText)
-        })
-        
-        return index
-      },
-      
-      lunr: () => {
-        return lunr(function () {
-          this.ref('id')
-          columns.forEach(col => {
-            this.field(col)
-          })
-          
-          baseRows.forEach((row, idx) => {
-            const doc = { id: idx }
-            columns.forEach(col => {
-              doc[col] = String(row[col] || '')
-            })
-            this.add(doc)
-          })
-        })
-      },
-      
-      fuzzysort: () => {
-        // Prepare the data for fuzzysort - convert rows to searchable strings with metadata
-        return baseRows.map((row, idx) => {
-          const searchableFields = {}
-          columns.forEach(col => {
-            const value = String(row[col] || '')
-            if (value) {
-              searchableFields[col] = fuzzysort.prepare(value)
-            }
-          })
-          return {
-            index: idx,
-            originalRow: row,
-            prepared: searchableFields
-          }
-        })
-      },
-
-      ufuzzy: () => {
-        const uf = new uFuzzy()
-        const haystack = baseRows.map(row => 
-          columns.map(col => String(row[col] || '')).join(' ')
-        )
-        return { uf, haystack }
-      },
-
-      fuzzysearch: () => {
-        // Simple implementation using fuzzysearch
-        return baseRows.map((row, idx) => ({
-          index: idx,
-          row,
-          searchText: columns.map(col => String(row[col] || '')).join(' ')
-        }))
-      },
-
-      fuzzy: () => {
-        // Prepare data for fuzzy.js
-        const options = {
-          extract: (row) => columns.map(col => String(row[col] || '')).join(' ')
-        }
-        return { data: baseRows, options }
-      },
-
-      microfuzz: () => {
-        // Simple microfuzz implementation
-        const haystack = baseRows.map((row, idx) => ({
-          index: idx,
-          row,
-          searchText: columns.map(col => String(row[col] || '')).join(' ').toLowerCase()
-        }))
-        return haystack
-      },
-
-      meilisearch: () => {
-        // For client-side usage, we'll implement a simple search similar to other engines
-        // Note: MeiliSearch is typically a server-side search engine
-        const documents = baseRows.map((row, idx) => ({
-          id: idx,
-          searchText: columns.map(col => String(row[col] || '')).join(' '),
-          ...row
-        }))
-        return documents
-      },
-
-      matchsorter: () => {
-        // Prepare data for match-sorter
-        return baseRows.map((row, idx) => ({
-          index: idx,
-          row,
-          searchableText: columns.map(col => String(row[col] || '')).join(' ')
-        }))
-      },
-
-      fastfuzzy: () => {
-        // Prepare haystack for fast-fuzzy search
-        return baseRows.map((row, idx) => ({
-          index: idx,
-          row,
-          searchText: columns.map(col => String(row[col] || '')).join(' ')
-        }))
-      },
-
-      stringsimilarity: () => {
-        // Prepare data for string-similarity
-        return baseRows.map((row, idx) => ({
-          index: idx,
-          row,
-          searchText: columns.map(col => String(row[col] || '')).join(' ')
-        }))
-      }
-    }
-  }, [baseRows, active?.columns, searchColumns, caseSensitive, exact])
-
-  const performSearch = useMemo(() => {
-    if (!baseRows.length || !query || !searchEngines) return baseRows
-    
-    try {
-      switch (searchEngine) {
-        case 'fuse': {
-          const fuse = searchEngines.fuse()
-          if (exact) {
-            const pattern = caseSensitive ? `=${query}` : `=${query.toLowerCase()}`
-            const lowered = caseSensitive ? baseRows : baseRows.map(r => 
-              Object.fromEntries(Object.entries(r).map(([k,v]) => 
-                [k, typeof v === 'string' ? v.toLowerCase() : v]
-              ))
-            )
-            const f = new Fuse(lowered, { 
-              keys: searchColumns?.length ? searchColumns : (active?.columns || []), 
-              useExtendedSearch: true 
-            })
-            return f.search(pattern).map(r => r.item)
-          }
-          return fuse.search(query).map(r => r.item)
-        }
-        
-        case 'minisearch': {
-          const ms = searchEngines.minisearch()
-          const results = ms.search(query, {
-            fuzzy: !exact,
-            prefix: !exact,
-            combineWith: 'AND'
-          })
-          return results.map(result => baseRows[result.id]).filter(Boolean)
-        }
-        
-        case 'flexsearch': {
-          const index = searchEngines.flexsearch()
-          const results = index.search(query)
-          return results.map(idx => baseRows[idx]).filter(Boolean)
-        }
-        
-        case 'lunr': {
-          const idx = searchEngines.lunr()
-          const searchQuery = exact ? query : `${query}~1 ${query}*`
-          const results = idx.search(searchQuery)
-          return results.map(result => baseRows[parseInt(result.ref)]).filter(Boolean)
-        }
-        
-        case 'fuzzysort': {
-          const preparedData = searchEngines.fuzzysort()
-          const results = []
-          
-          preparedData.forEach(item => {
-            let bestScore = -Infinity
-            let hasMatch = false
-            
-            // Search across all prepared fields
-            Object.keys(item.prepared).forEach(fieldName => {
-              const preparedField = item.prepared[fieldName]
-              if (preparedField) {
-                const result = fuzzysort.single(query, preparedField)
-                if (result && result.score > -1000) { // fuzzysort uses negative scores, higher is better
-                  hasMatch = true
-                  bestScore = Math.max(bestScore, result.score)
-                }
-              }
-            })
-            
-            if (hasMatch) {
-              results.push({
-                item: item.originalRow,
-                score: bestScore
-              })
-            }
-          })
-          
-          // Sort by score (higher scores are better in fuzzysort)
-          results.sort((a, b) => b.score - a.score)
-          return results.map(r => r.item)
-        }
-
-        case 'ufuzzy': {
-          const { uf, haystack } = searchEngines.ufuzzy()
-          const idxs = uf.filter(haystack, query)
-          if (idxs?.length) {
-            const info = uf.info(idxs, haystack, query)
-            const order = uf.sort(info, haystack, query)
-            return order.map(i => baseRows[idxs[i]]).filter(Boolean)
-          }
-          return []
-        }
-
-        case 'fuzzysearch': {
-          const searchData = searchEngines.fuzzysearch()
-          const results = searchData.filter(item => {
-            const needle = caseSensitive ? query : query.toLowerCase()
-            const haystack = caseSensitive ? item.searchText : item.searchText.toLowerCase()
-            return fuzzysearch(needle, haystack)
-          })
-          return results.map(r => r.row)
-        }
-
-        case 'fuzzy': {
-          const { data, options } = searchEngines.fuzzy()
-          const results = fuzzy.filter(query, data, options)
-          return results.map(r => r.original)
-        }
-
-        case 'microfuzz': {
-          const haystack = searchEngines.microfuzz()
-          const needle = caseSensitive ? query : query.toLowerCase()
-          const results = []
-          
-          // Simple fuzzy matching implementation
-          haystack.forEach(item => {
-            const text = caseSensitive ? item.searchText : item.searchText.toLowerCase()
-            let score = 0
-            let lastIndex = -1
-            let matches = 0
-            
-            for (let i = 0; i < needle.length; i++) {
-              const char = needle[i]
-              const index = text.indexOf(char, lastIndex + 1)
-              if (index !== -1) {
-                matches++
-                score += needle.length - (index - lastIndex)
-                lastIndex = index
-              }
-            }
-            
-            if (matches === needle.length || text.includes(needle)) {
-              results.push({ ...item, score })
-            }
-          })
-          
-          results.sort((a, b) => b.score - a.score)
-          return results.map(r => r.row)
-        }
-
-        case 'meilisearch': {
-          const documents = searchEngines.meilisearch()
-          const needle = caseSensitive ? query : query.toLowerCase()
-          const results = documents.filter(doc => {
-            const text = caseSensitive ? doc.searchText : doc.searchText.toLowerCase()
-            return text.includes(needle)
-          })
-          return results.map(doc => baseRows[doc.id]).filter(Boolean)
-        }
-
-        case 'matchsorter': {
-          const data = searchEngines.matchsorter()
-          const results = matchSorter(data, query, {
-            keys: ['searchableText'],
-            threshold: exact ? matchSorter.rankings.EQUAL : matchSorter.rankings.CONTAINS
-          })
-          return results.map(r => r.row)
-        }
-
-        case 'fastfuzzy': {
-          const data = searchEngines.fastfuzzy()
-          const results = []
-          
-          data.forEach(item => {
-            const options = {
-              ignoreCase: !caseSensitive,
-              returnMatchData: true
-            }
-            const result = fastFuzzySearch(query, [item.searchText], options)
-            if (result.length > 0) {
-              results.push({
-                item,
-                score: result[0].score || 0
-              })
-            }
-          })
-          
-          results.sort((a, b) => b.score - a.score)
-          return results.map(r => r.item.row)
-        }
-
-        case 'stringsimilarity': {
-          const data = searchEngines.stringsimilarity()
-          const results = []
-          
-          data.forEach(item => {
-            const text = caseSensitive ? item.searchText : item.searchText.toLowerCase()
-            const needle = caseSensitive ? query : query.toLowerCase()
-            const similarity = stringSimilarity.compareTwoStrings(needle, text)
-            
-            if (similarity > 0.1 || text.includes(needle)) { // threshold for relevance
-              results.push({
-                item,
-                similarity
-              })
-            }
-          })
-          
-          results.sort((a, b) => b.similarity - a.similarity)
-          return results.map(r => r.item.row)
-        }
-        
-        default:
-          return baseRows
-      }
-    } catch (error) {
-      console.error(`Search engine ${searchEngine} error:`, error)
-      return baseRows
-    }
-  }, [baseRows, query, searchEngine, searchEngines, searchColumns, caseSensitive, exact, active?.columns])
-
-  const filtered = useMemo(() => {
-    if (!baseRows.length) return []
-    if (!query) return baseRows
-    return performSearch
-  }, [baseRows, query, performSearch])
 
   const sorted = useMemo(() => {
     if (!sortBy) return filtered
@@ -832,21 +649,43 @@ export default function App() {
 
   // ---------- File actions ----------
   const onFiles = async (files) => {
-    const file = files?.[0]
-    if (!file) return
-    try {
-      const buf = await readFileAsArrayBuffer(file)
-      const wb = XLSX.read(buf, { type: 'array' })
-      const newSheets = wb.SheetNames.map(name => { const rows = buildRows(wb.Sheets[name]); const columns = buildColumns(rows); return { name, rows, columns } })
-      setSheets(newSheets)
-      setActiveSheet(newSheets?.[0]?.name || '')
-      setFileName(file.name)
+    if (!files?.length) return
+    
+    let newLoadedFiles = [...loadedFiles]
+    let lastFileId = activeFileId
+    let lastSheetName = activeSheet
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      try {
+        const buf = await readFileAsArrayBuffer(file)
+        const wb = XLSX.read(buf, { type: 'array' })
+        const newSheets = wb.SheetNames.map(name => { const rows = buildRows(wb.Sheets[name]); const columns = buildColumns(rows); return { name, rows, columns } })
+        
+        const newFileId = crypto.randomUUID()
+        newLoadedFiles.push({
+          id: newFileId,
+          name: file.name,
+          sheets: newSheets,
+          modified: false,
+          originalBuffer: buf // Store original buffer for styles
+        })
+        lastFileId = newFileId
+        lastSheetName = newSheets?.[0]?.name || ''
+        
+        const uploadMeta = { fileName: file.name, totalRows: newSheets.reduce((a,s)=>a+(s.rows?.length||0),0), sheetCount: newSheets.length, sheets: newSheets.map(s => ({ name: s.name, rowCount: s.rows?.length || 0, colCount: s.columns?.length || 0 })) }
+        postUploadHistory(uploadMeta)
+        toast.success(`File ${file.name} parsed`)
+      } catch { toast.error(`Failed to parse ${file.name}`) }
+    }
+    
+    setLoadedFiles(newLoadedFiles)
+    if (!activeFileId || files.length === 1) {
+      setActiveFileId(lastFileId)
+      setActiveSheet(lastSheetName)
       setSearchColumns([])
       setSelectedViewId('')
-      const uploadMeta = { fileName: file.name, totalRows: newSheets.reduce((a,s)=>a+(s.rows?.length||0),0), sheetCount: newSheets.length, sheets: newSheets.map(s => ({ name: s.name, rowCount: s.rows?.length || 0, colCount: s.columns?.length || 0 })) }
-      postUploadHistory(uploadMeta)
-      toast.success('File parsed successfully')
-    } catch { toast.error('Failed to parse file') }
+    }
   }
   const onDrop = (e) => { e.preventDefault(); onFiles(e.dataTransfer?.files) }
   const onBrowse = () => fileInputRef.current?.click()
@@ -878,6 +717,130 @@ export default function App() {
   const exportRows = (rows, ext) => { if (!rows?.length) return toast.error('No data to export'); const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, activeSheet || 'Sheet1'); XLSX.writeFile(wb, `${fileName || 'data'}-filtered.${ext}`, { bookType: ext }) }
   const downloadCSV = () => exportRows(sorted, 'csv')
   const downloadXLSX = () => exportRows(sorted, 'xlsx')
+
+  const exportWithStyles = async (file) => {
+    if (!file.originalBuffer) {
+      const wb = XLSX.utils.book_new()
+      file.sheets.forEach(sheet => {
+        const ws = XLSX.utils.json_to_sheet(sheet.rows)
+        XLSX.utils.book_append_sheet(wb, ws, sheet.name)
+      })
+      return XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+    }
+
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(file.originalBuffer)
+
+    // To preserve styles safely and avoid corruption from spliceRows, 
+    // we'll reconstruct the sheets we modified.
+    for (const sheetData of file.sheets) {
+      const originalSheet = workbook.getWorksheet(sheetData.name)
+      if (!originalSheet) continue
+
+      // Create a temporary name that won't collide
+      const tempName = `TMP_${Math.random().toString(36).slice(2, 7)}`
+      const newSheet = workbook.addWorksheet(tempName)
+      
+      // Copy sheet-level properties
+      newSheet.properties = originalSheet.properties
+      newSheet.pageSetup = originalSheet.pageSetup
+      newSheet.views = originalSheet.views
+
+      // Copy column dimensions
+      originalSheet.columns?.forEach((col, i) => {
+        if (newSheet.getColumn(i + 1)) {
+          newSheet.getColumn(i + 1).width = col.width
+          newSheet.getColumn(i + 1).style = col.style
+        }
+      })
+
+      // Copy and update header (row 1)
+      const headerRow = originalSheet.getRow(1)
+      const newHeaderRow = newSheet.getRow(1)
+      headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        const newCell = newHeaderRow.getCell(colNumber)
+        newCell.value = cell.value
+        newCell.style = cell.style
+      })
+      newHeaderRow.height = headerRow.height
+
+      const colMap = {}
+      headerRow.eachCell((cell, cIdx) => {
+        if (cell.value) colMap[String(cell.value)] = cIdx
+      })
+
+      // Copy and update data rows
+      sheetData.rows.forEach((row, index) => {
+        const originalRow = originalSheet.getRow(row.__rowNum)
+        const newRow = newSheet.getRow(index + 2) // index + 2 because row 1 is header
+
+        // Copy original styles and values first
+        originalRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+           const newCell = newRow.getCell(colNumber)
+           newCell.style = cell.style
+           newCell.value = cell.value
+        })
+        newRow.height = originalRow.height
+
+        // Overwrite with current JSON values for known columns
+        sheetData.columns.forEach((colName) => {
+          const colIdx = colMap[colName]
+          if (colIdx) {
+            newRow.getCell(colIdx).value = row[colName]
+          }
+        })
+      })
+
+      // Remove the original and rename the new one
+      const originalName = originalSheet.name
+      const originalId = originalSheet.id
+      workbook.removeWorksheet(originalId)
+      newSheet.name = originalName
+    }
+
+    return await workbook.xlsx.writeBuffer()
+  }
+
+  const downloadActiveFile = async () => {
+    if (!activeFile) return toast.error('No active file selected')
+    const toastId = toast.loading(`Preparing ${activeFile.name} with styles...`)
+    try {
+      const buffer = await exportWithStyles(activeFile)
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      saveAs(blob, activeFile.name.endsWith('.xlsx') || activeFile.name.endsWith('.xls') ? activeFile.name : `${activeFile.name}.xlsx`)
+      toast.success(`Downloaded ${activeFile.name}`, { id: toastId })
+    } catch (err) {
+      console.error('Download error:', err)
+      toast.error('Failed to download', { id: toastId })
+    }
+  }
+
+  const downloadZip = async (type = 'all') => {
+    const filesToDownload = type === 'modified' 
+      ? loadedFiles.filter(f => f.modified)
+      : loadedFiles
+
+    if (filesToDownload.length === 0) {
+      return toast.error(type === 'modified' ? 'No modified files to download' : 'No files loaded')
+    }
+
+    const zip = new JSZip()
+    const toastId = toast.loading(`Preparing ${filesToDownload.length} files with styles...`)
+
+    try {
+      for (const file of filesToDownload) {
+        const buffer = await exportWithStyles(file)
+        zip.file(file.name.endsWith('.xlsx') || file.name.endsWith('.xls') ? file.name : `${file.name}.xlsx`, buffer)
+      }
+
+      const content = await zip.generateAsync({ type: 'blob' })
+      saveAs(content, `exported_files_${type}_${new Date().toISOString().slice(0,10)}.zip`)
+      toast.success('Download started', { id: toastId })
+    } catch (err) {
+      console.error('ZIP error:', err)
+      toast.error('Failed to create ZIP', { id: toastId })
+    }
+  }
 
   // View payload
   const buildViewPayload = () => ({
@@ -984,9 +947,12 @@ export default function App() {
       const buf = await readFileAsArrayBuffer(f)
       const wb = XLSX.read(buf, { type: 'array' })
       const newSheets = wb.SheetNames.map(name => { const rows = buildRows(wb.Sheets[name]); const columns = buildColumns(rows); return { name, rows, columns } })
-      setSheets(newSheets)
+      
+      const newFileId = crypto.randomUUID()
+      setLoadedFiles(prev => [...prev, { id: newFileId, name: f.name, sheets: newSheets, modified: false, originalBuffer: buf }])
+      setActiveFileId(newFileId)
       setActiveSheet(newSheets?.[0]?.name || '')
-      setFileName(f.name)
+      
       // post upload into history
       postUploadHistory({ fileName: f.name, totalRows: newSheets.reduce((a,s)=>a+(s.rows?.length||0),0), sheetCount: newSheets.length, sheets: newSheets.map(s => ({ name: s.name, rowCount: s.rows?.length || 0, colCount: s.columns?.length || 0 })) })
       // re-apply pending view
@@ -1099,19 +1065,50 @@ export default function App() {
             {/* Primary Action Buttons */}
             <div className="space-y-4">
               {/* Export Actions */}
-              <div className="flex flex-wrap items-center gap-3 p-4 bg-muted/30 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <Download className="h-4 w-4 text-primary"/>
-                  <span className="text-sm font-medium text-muted-foreground">Export Data</span>
+              <div className="flex flex-col gap-4 p-4 bg-muted/30 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Download className="h-4 w-4 text-primary"/>
+                    <span className="text-sm font-medium text-muted-foreground">Download Options</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {loadedFiles.length} files loaded • {loadedFiles.filter(f => f.modified).length} modified
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="secondary" onClick={downloadCSV} className="flex items-center gap-2">
-                    <Download className="h-4 w-4"/>
-                    Export CSV
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <Button variant="outline" onClick={() => downloadZip('all')} className="flex items-center gap-2 h-12 bg-background hover:bg-primary/5 border-primary/20">
+                    <FileArchive className="h-5 w-5 text-blue-500"/>
+                    <div className="text-left">
+                      <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Choice 1</div>
+                      <div className="text-sm">All Loaded Files</div>
+                    </div>
                   </Button>
-                  <Button onClick={downloadXLSX} className="flex items-center gap-2">
-                    <Download className="h-4 w-4"/>
-                    Export XLSX
+                  
+                  <Button variant="outline" onClick={() => downloadZip('modified')} className="flex items-center gap-2 h-12 bg-background hover:bg-primary/5 border-primary/20">
+                    <FileCheck className="h-5 w-5 text-green-500"/>
+                    <div className="text-left">
+                      <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Choice 2</div>
+                      <div className="text-sm">Modified Files Only</div>
+                    </div>
+                  </Button>
+                  
+                  <Button variant="outline" onClick={downloadActiveFile} className="flex items-center gap-2 h-12 bg-background hover:bg-primary/5 border-primary/20">
+                    <FileIcon className="h-5 w-5 text-orange-500"/>
+                    <div className="text-left">
+                      <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Choice 3</div>
+                      <div className="text-sm">Single (Active) File</div>
+                    </div>
+                  </Button>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 border-t">
+                  <span className="text-xs font-medium text-muted-foreground">Quick Export (Current View):</span>
+                  <Button variant="ghost" size="sm" onClick={downloadCSV} className="h-7 text-xs gap-1">
+                    <Download className="h-3 w-3"/> CSV
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={downloadXLSX} className="h-7 text-xs gap-1">
+                    <Download className="h-3 w-3"/> XLSX
                   </Button>
                 </div>
               </div>
@@ -1373,60 +1370,223 @@ export default function App() {
                       <span className="ml-auto text-xs text-muted-foreground">Theme</span>
                     </Button>
                   )}
+                </div>
+              </div>
 
-                  <div className="space-y-2">
-                    <div className="text-xs text-muted-foreground font-medium">Export Options</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={downloadCSV} 
-                        className="h-8 text-xs"
-                        title="Export filtered data as CSV"
-                      >
-                        <Download className="h-3 w-3 mr-1"/>
-                        CSV
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={downloadXLSX} 
-                        className="h-8 text-xs"
-                        title="Export filtered data as Excel"
-                      >
-                        <Download className="h-3 w-3 mr-1"/>
-                        Excel
-                      </Button>
-                    </div>
+              {/* Session & Backup Group */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                  <h3 className="text-sm font-semibold text-foreground">Session & Backup</h3>
+                </div>
+                <div className="space-y-3">
+                  <Button 
+                    onClick={handleBackupToServer} 
+                    variant="outline" 
+                    size="sm" 
+                    className="w-full justify-start h-10 border-orange-200 dark:border-orange-900/30 hover:bg-orange-50 dark:hover:bg-orange-900/10"
+                  >
+                    <CloudUpload className="h-4 w-4 mr-2 text-orange-600"/>
+                    Backup to Server
+                    {lastBackupTime && (
+                      <span className="ml-auto text-[10px] text-muted-foreground">
+                        {lastBackupTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                  </Button>
+                  
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button 
+                      onClick={() => window.location.reload()} 
+                      variant="outline" 
+                      size="sm" 
+                      className="justify-start"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 mr-2"/>
+                      Reload
+                    </Button>
+                    <Button 
+                      onClick={clearSession} 
+                      variant="outline" 
+                      size="sm" 
+                      className="justify-start text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-2"/>
+                      Clear
+                    </Button>
                   </div>
+                  
+                  <p className="text-[10px] text-muted-foreground px-1 italic">
+                    Session is automatically saved to browser storage. Click 'Backup to Server' to save a physical file in the /backup folder.
+                  </p>
                 </div>
               </div>
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          {/* Upload */}
-          <div onDrop={onDrop} onDragOver={(e) => e.preventDefault()} className="border border-dashed rounded-lg p-6 flex flex-col items-center justify-center text-center bg-muted">
-            <FileUp className="h-8 w-8 mb-2"/>
-            <div className="font-medium">Drag &amp; drop XLSX here</div>
-            <div className="text-sm text-muted-foreground mb-2">or</div>
-            <Button variant="secondary" onClick={onBrowse}>Browse</Button>
-            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => onFiles(e.target.files)}/>
-            {fileName && <div className="mt-3 text-sm text-muted-foreground">Loaded: {fileName}</div>}
-          </div>
+        <CardContent onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
+          <Tabs value={mainTab} onValueChange={setMainTab} className="w-full">
+            <div className="flex justify-center mb-6">
+              <TabsList className="grid w-full max-w-md grid-cols-2">
+                <TabsTrigger value="single">Single File Search</TabsTrigger>
+                <TabsTrigger value="global">Global Search</TabsTrigger>
+              </TabsList>
+            </div>
+            
+            <TabsContent value="global" className="mt-0">
+              <div className="space-y-4">
+                <div className="relative">
+                  <Search className="h-5 w-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground"/>
+                  <Input 
+                    value={globalQuery} 
+                    onChange={(e) => setGlobalQuery(e.target.value)} 
+                    placeholder="Search across all loaded files and sheets..." 
+                    className="pl-10 h-12 text-lg bg-background"
+                  />
+                </div>
+                
+                {/* Global Search Options */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-sm font-medium whitespace-nowrap">Search Engine</Label>
+                    <Select value={searchEngine} onValueChange={setSearchEngine}>
+                      <SelectTrigger className="w-48">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fuse">Fuse.js</SelectItem>
+                        <SelectItem value="minisearch">MiniSearch</SelectItem>
+                        <SelectItem value="flexsearch">FlexSearch</SelectItem>
+                        <SelectItem value="lunr">Lunr.js</SelectItem>
+                        <SelectItem value="fuzzysort">FuzzySort</SelectItem>
+                        <SelectItem value="ufuzzy">uFuzzy</SelectItem>
+                        <SelectItem value="fuzzysearch">FuzzySearch</SelectItem>
+                        <SelectItem value="fuzzy">Fuzzy.js</SelectItem>
+                        <SelectItem value="microfuzz">MicroFuzz</SelectItem>
+                        <SelectItem value="meilisearch">MeiliSearch</SelectItem>
+                        <SelectItem value="matchsorter">Match Sorter</SelectItem>
+                        <SelectItem value="fastfuzzy">Fast Fuzzy</SelectItem>
+                        <SelectItem value="stringsimilarity">String Similarity</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <SlidersHorizontal className="h-4 w-4 text-muted-foreground"/>
+                      <Label htmlFor="exact-global" className="text-sm font-medium">Exact Match</Label>
+                      <Switch id="exact-global" checked={exact} onCheckedChange={setExact}/>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="case-global" className="text-sm font-medium">Case Sensitive</Label>
+                      <Switch id="case-global" checked={caseSensitive} onCheckedChange={setCaseSensitive}/>
+                    </div>
+                  </div>
+                </div>
 
-          {sheets?.length > 0 && (
-            <div className="mt-6 space-y-6">
+                {isGlobalSearching ? (
+                  <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+                ) : globalResults.length > 0 ? (
+                  <div className="space-y-4">
+                    <div className="text-sm text-muted-foreground">Found matches in {globalResults.length} file(s)</div>
+                    <Tabs value={globalActiveFileId} onValueChange={setGlobalActiveFileId} className="w-full">
+                      <TabsList className="flex flex-wrap h-auto mb-4">
+                        {globalResults.map(f => (
+                          <TabsTrigger key={f.fileId} value={f.fileId} className="whitespace-nowrap">
+                            {f.fileName}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                      
+                      {globalResults.map(f => (
+                        <TabsContent key={f.fileId} value={f.fileId} className="space-y-6">
+                          {f.sheets.map((sheet, sIdx) => (
+                            <div key={sIdx} className="space-y-2">
+                              <h3 className="font-semibold flex items-center gap-2">
+                                <TableIcon className="h-4 w-4" />
+                                {sheet.sheetName}
+                                <span className="text-xs text-muted-foreground font-normal">({sheet.matches.length} matches)</span>
+                              </h3>
+                              <div className="border rounded-md overflow-hidden bg-background">
+                                <div className="max-h-[500px] overflow-auto">
+                                  <table className="w-full text-sm">
+                                    <thead className="bg-muted sticky top-0 z-10">
+                                      <tr>
+                                        {sheet.columns.map(c => (
+                                          <th key={c} className="text-left px-3 py-2 whitespace-nowrap">{c}</th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {sheet.matches.slice(0, 100).map((row, rIdx) => (
+                                        <tr 
+                                          key={rIdx} 
+                                          className={`cursor-pointer hover:bg-muted/60 ${rIdx % 2 === 0 ? 'bg-background' : 'bg-muted/20'}`}
+                                          title="Double-click to edit in Single File view"
+                                          onDoubleClick={() => {
+                                            setActiveFileId(f.fileId);
+                                            setActiveSheet(sheet.sheetName);
+                                            setQuery(globalQuery);
+                                            setMainTab('single');
+                                            toast.success(`Jumped to ${f.fileName} - ${sheet.sheetName}`);
+                                          }}
+                                        >
+                                          {sheet.columns.map(c => (
+                                            <td key={c} className="px-3 py-2 whitespace-nowrap overflow-hidden text-ellipsis max-w-[200px]">
+                                              {highlightMatch(row[c] || '', globalQuery)}
+                                            </td>
+                                          ))}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                                {sheet.matches.length > 100 && (
+                                  <div className="p-2 text-center text-xs text-muted-foreground bg-muted/10 border-t">
+                                    Showing first 100 matches. Double-click any row to view all in Single File mode.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </TabsContent>
+                      ))}
+                    </Tabs>
+                  </div>
+                ) : globalQuery ? (
+                  <div className="text-center p-12 text-muted-foreground border rounded-md border-dashed">No matches found across all files.</div>
+                ) : (
+                  <div className="text-center p-12 text-muted-foreground border rounded-md border-dashed">Enter a query to search across all files.</div>
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="single" className="mt-0">
+              <div className="flex flex-col lg:flex-row gap-6">
+                <div className="flex-1 min-w-0 order-2 lg:order-1">
+                  {loadedFiles.length === 0 ? (
+                    <div className="border border-dashed rounded-lg p-12 flex flex-col items-center justify-center text-center bg-muted/30">
+                      <FileUp className="h-10 w-10 mb-4 text-muted-foreground"/>
+                      <div className="font-medium text-lg mb-1">Drag &amp; drop files here</div>
+                      <div className="text-sm text-muted-foreground mb-4">Support for multiple XLSX/XLS files</div>
+                      <Button onClick={onBrowse}>Browse Files</Button>
+                    </div>
+                  ) : activeFileId && sheets?.length > 0 ? (
+                    <div className="space-y-6">
               {/* Search and Filter Controls */}
               <div className="space-y-4">
                 {/* Search Bar */}
                 <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
                   <div className="relative flex-1 min-w-[280px]">
-                    <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground"/>
+                    {isSearching ? (
+                      <Loader2 className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-primary animate-spin"/>
+                    ) : (
+                      <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground"/>
+                    )}
                     <Input 
                       value={query} 
                       onChange={(e) => setQuery(e.target.value)} 
-                      placeholder="Search across all columns..." 
+                      placeholder={isSearching ? "Searching..." : "Search across all columns..."}
                       className="pl-10 h-10 text-base"
                     />
                   </div>
@@ -1954,8 +2114,77 @@ export default function App() {
                   </TabsContent>
                 ))}
               </Tabs>
-            </div>
-          )}
+                    </div>
+                  ) : (
+                    <div className="text-center p-12 border border-dashed rounded-lg text-muted-foreground">
+                      Select a file from the sidebar to view it.
+                    </div>
+                  )}
+                </div>
+
+                {/* Sidebar for loaded files tree */}
+                <div className="w-full lg:w-72 shrink-0 order-1 lg:order-2">
+                  <Card className="sticky top-4">
+                    <CardHeader className="pb-3 px-4">
+                      <CardTitle className="text-base flex justify-between items-center">
+                        Loaded Files
+                        <Button variant="outline" size="sm" onClick={onBrowse} title="Add more files" className="h-8">
+                          <FileUp className="h-4 w-4 mr-2" />
+                          Add
+                        </Button>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="max-h-[600px] overflow-y-auto p-4 pt-0 space-y-2">
+                        {loadedFiles.length === 0 && <div className="text-sm text-muted-foreground text-center py-4">No files loaded.</div>}
+                        {loadedFiles.map(f => (
+                          <div key={f.id} className="space-y-1">
+                            <div 
+                              className={`font-medium text-sm px-3 py-2 rounded-md cursor-pointer flex items-center justify-between transition-colors ${activeFileId === f.id ? 'bg-primary text-primary-foreground' : 'hover:bg-muted bg-muted/30'}`}
+                              onClick={() => { setActiveFileId(f.id); if(!activeSheet || !f.sheets.find(s=>s.name===activeSheet)) setActiveSheet(f.sheets[0]?.name||''); }}
+                            >
+                              <span className="truncate pr-2">{f.name}</span>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className={`h-6 w-6 shrink-0 ${activeFileId === f.id ? 'text-primary-foreground hover:bg-primary-foreground/20' : 'text-muted-foreground hover:text-destructive'}`} 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setLoadedFiles(prev => prev.filter(x => x.id !== f.id)); 
+                                  if (activeFileId === f.id) {
+                                    const rem = loadedFiles.filter(x => x.id !== f.id);
+                                    setActiveFileId(rem.length ? rem[0].id : '');
+                                    setActiveSheet(rem.length ? rem[0].sheets[0]?.name||'' : '');
+                                  }
+                                }}
+                              >
+                                 <XIcon className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            {activeFileId === f.id && f.sheets.length > 1 && (
+                              <div className="pl-3 space-y-1 border-l-2 border-muted ml-3 my-1">
+                                {f.sheets.map(s => (
+                                  <div 
+                                    key={s.name} 
+                                    className={`text-xs px-2 py-1.5 rounded cursor-pointer truncate transition-colors ${activeSheet === s.name ? 'bg-muted font-medium text-foreground' : 'hover:bg-muted/50 text-muted-foreground'}`}
+                                    onClick={() => setActiveSheet(s.name)}
+                                  >
+                                    {s.name}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+          
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" multiple className="hidden" onChange={(e) => onFiles(e.target.files)}/>
         </CardContent>
       </Card>
 
