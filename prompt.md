@@ -15,3 +15,6 @@ when i see result global research i wanna for multi file each file have own tab 
 7. when i download the data i wanna have two choice first is download all loaded excel file or just download the excel file that i made update on or just download single file
 
 8. when i upload excel file and made an update and download new excel file with the change the format template of excel file is change i mean this table color and format of font or type of wedth and height of row and column are change it is like pure excel file with pure format my old change is lost.
+
+9. when i update the cell in the excell they show that it is updated but actually not updated
+remember don't use browser 

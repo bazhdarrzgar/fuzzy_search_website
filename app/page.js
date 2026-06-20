@@ -328,26 +328,34 @@ export default function App() {
 
   const saveEditingCell = () => {
     if (editingCell.rowIndex === -1) return
-    
+
     const targetRow = sorted[editingCell.rowIndex]
-    if (targetRow) {
-      targetRow[editingCell.column] = editingCell.value
-      
-      // Update in the original data
-      const sheetIndex = sheets.findIndex(s => s.name === activeSheet)
-      if (sheetIndex !== -1) {
-        const originalRowIndex = active.rows.findIndex(r => 
-          JSON.stringify(r) === JSON.stringify(targetRow)
-        )
-        if (originalRowIndex !== -1) {
-          active.rows[originalRowIndex][editingCell.column] = editingCell.value
-        }
-      }
-      
-      setSheets([...sheets])
-      toast.success('Cell updated')
+    if (!targetRow) {
+      setIsEditing(false)
+      setEditingCell({ rowIndex: -1, column: '', value: '' })
+      return
     }
-    
+
+    // Use __rowNum as a stable identity key (set during buildRows) so the
+    // lookup happens BEFORE we mutate anything, avoiding the stale-JSON bug.
+    const targetRowNum = targetRow.__rowNum
+
+    setLoadedFiles(prev => prev.map(file => {
+      if (file.id !== activeFileId) return file
+      const newSheets = file.sheets.map(sheet => {
+        if (sheet.name !== activeSheet) return sheet
+        const newRows = sheet.rows.map(row => {
+          if (row.__rowNum === targetRowNum) {
+            return { ...row, [editingCell.column]: editingCell.value }
+          }
+          return row
+        })
+        return { ...sheet, rows: newRows }
+      })
+      return { ...file, sheets: newSheets, modified: true }
+    }))
+
+    toast.success('Cell updated')
     setIsEditing(false)
     setEditingCell({ rowIndex: -1, column: '', value: '' })
   }
@@ -988,7 +996,7 @@ export default function App() {
   const onDragEnd = (event) => { const { active: act, over } = event; if (!over || act.id === over.id) return; const oldIndex = visibleColumns.indexOf(act.id); const newIndex = visibleColumns.indexOf(over.id); if (oldIndex === -1 || newIndex === -1) return; setVisibleColumns(prev => arrayMove(prev, oldIndex, newIndex)) }
 
   return (
-    <div className="container py-8 theme-transition">
+    <div className="w-full px-4 py-4 theme-transition">
       <Card className="mb-6 theme-transition">
         <CardHeader>
           <div className="flex flex-col gap-6">
@@ -1467,6 +1475,7 @@ export default function App() {
                         <SelectItem value="matchsorter">Match Sorter</SelectItem>
                         <SelectItem value="fastfuzzy">Fast Fuzzy</SelectItem>
                         <SelectItem value="stringsimilarity">String Similarity</SelectItem>
+                        <SelectItem value="hybrid">Hybrid Search (RRF)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1532,7 +1541,7 @@ export default function App() {
                                           }}
                                         >
                                           {sheet.columns.map(c => (
-                                            <td key={c} className="px-3 py-2 whitespace-nowrap overflow-hidden text-ellipsis max-w-[200px]">
+                                            <td key={c} className="px-3 py-2 whitespace-normal break-words align-top" style={{ maxWidth: '400px' }}>
                                               {highlightMatch(row[c] || '', globalQuery)}
                                             </td>
                                           ))}
@@ -1677,6 +1686,12 @@ export default function App() {
                             <span className="text-xs text-muted-foreground">Finds degree of similarity between strings (Dice coefficient)</span>
                           </div>
                         </SelectItem>
+                        <SelectItem value="hybrid">
+                          <div className="flex flex-col">
+                            <span className="font-medium">Hybrid Search (RRF)</span>
+                            <span className="text-xs text-muted-foreground">Fuzzy + Vector Search blended with Reciprocal Rank Fusion</span>
+                          </div>
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1758,15 +1773,15 @@ export default function App() {
                 <TabsList className="flex-wrap">{sheets.map(s => (<TabsTrigger key={s.name} value={s.name}>{s.name}</TabsTrigger>))}</TabsList>
                 {sheets.map(s => (
                   <TabsContent key={s.name} value={s.name} className="mt-4">
-                    <div className="overflow-hidden border rounded-md">
-                      <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+                    <div className="overflow-auto border rounded-md">
+                      <table className="w-full text-sm" style={{ tableLayout: 'auto' }}>
                         <thead className="bg-muted sticky top-0 z-10">
                           <tr>
                             <th className="px-2 py-2 w-10"><Checkbox checked={allOnPageSelected} onCheckedChange={toggleAllOnPage}/></th>
                             {displayColumns.map(col => (
-                              <th key={col} className="text-left px-3 py-2 cursor-pointer select-none relative" onClick={() => toggleSort(col)} style={{ width: columnWidths[col] ? `${columnWidths[col]}px` : undefined }}>
+                              <th key={col} className="text-left px-3 py-2 cursor-pointer select-none relative whitespace-nowrap" onClick={() => toggleSort(col)} style={{ minWidth: columnWidths[col] ? `${columnWidths[col]}px` : '80px' }}>
                                 <div className="flex items-center gap-2">
-                                  <span className="truncate" title={col}>{col}</span>
+                                  <span title={col}>{col}</span>
                                   {sortBy === col && <span className="text-xs text-muted-foreground">{sortDir === 'asc' ? '▲' : '▼'}</span>}
                                 </div>
                                 <span onMouseDown={(e) => { e.stopPropagation(); onResizerMouseDown(col, e) }} className="absolute right-0 top-0 h-full w-1 cursor-col-resize" />
@@ -1776,19 +1791,19 @@ export default function App() {
                         </thead>
                       </table>
                       {virtualizeEnabled ? (
-                        <div ref={bodyContainerRef} className="overflow-auto" style={{ height: 480 }}>
+                        <div ref={bodyContainerRef} className="overflow-auto" style={{ height: 'calc(100vh - 280px)' }}>
                           <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
                             {rowVirtualizer.getVirtualItems().map(vi => { const row = sorted[vi.index]; const globalIdx = vi.index; return (
                               <div key={vi.key} style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vi.start}px)` }}>
-                                <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+                                <table className="w-full text-sm" style={{ tableLayout: 'auto' }}>
                                   <tbody>
                                     <tr className={vi.index % 2 === 0 ? 'bg-background' : 'bg-muted/40'} style={{ height: VIRTUAL_ROW_HEIGHT }}>
                                       <td className="px-2 py-2 w-10"><Checkbox checked={selectedRows.has(String(globalIdx))} onCheckedChange={() => toggleRow(row, globalIdx)} /></td>
                                       {displayColumns.map(col => (
                                         <td 
                                           key={col} 
-                                          className="px-3 py-2 whitespace-nowrap overflow-hidden text-ellipsis cursor-pointer hover:bg-muted/60" 
-                                          style={{ width: columnWidths[col] ? `${columnWidths[col]}px` : undefined }}
+                                          className="px-3 py-2 whitespace-normal break-words cursor-pointer hover:bg-muted/60 align-top" 
+                                          style={{ minWidth: columnWidths[col] ? `${columnWidths[col]}px` : '80px', maxWidth: '400px' }}
                                           onDoubleClick={() => startEditingCell(vi.index, col, row?.[col])}
                                         >
                                           {isEditing && editingCell.rowIndex === vi.index && editingCell.column === col ? (
@@ -1817,7 +1832,7 @@ export default function App() {
                         </div>
                       ) : (
                         <div className="overflow-auto">
-                          <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+                          <table className="w-full text-sm" style={{ tableLayout: 'auto' }}>
                             <tbody>
                               {pageRows.map((row, idx) => { const globalIdx = (page - 1) * PAGE_SIZE + idx; return (
                                 <tr key={idx} className={idx % 2 === 0 ? 'bg-background' : 'bg-muted/40'}>
@@ -1825,8 +1840,8 @@ export default function App() {
                                   {displayColumns.map(col => (
                                     <td 
                                       key={col} 
-                                      className="px-3 py-2 whitespace-nowrap overflow-hidden text-ellipsis cursor-pointer hover:bg-muted/60" 
-                                      style={{ width: columnWidths[col] ? `${columnWidths[col]}px` : undefined }}
+                                      className="px-3 py-2 whitespace-normal break-words cursor-pointer hover:bg-muted/60 align-top" 
+                                      style={{ minWidth: columnWidths[col] ? `${columnWidths[col]}px` : '80px', maxWidth: '400px' }}
                                       onDoubleClick={() => startEditingCell(globalIdx, col, row?.[col])}
                                     >
                                       {isEditing && editingCell.rowIndex === globalIdx && editingCell.column === col ? (

@@ -5,7 +5,7 @@ const nextConfig = {
   },
   experimental: {
     // Remove if not using Server Components
-    serverComponentsExternalPackages: ['mongodb'],
+    serverComponentsExternalPackages: ['mongodb', 'sharp', 'onnxruntime-node'],
   },
   webpack(config, { dev }) {
     if (dev) {
@@ -16,6 +16,14 @@ const nextConfig = {
         ignored: ['**/node_modules'],
       };
     }
+    
+    // Ignore node-specific modules when bundling for the browser
+    config.resolve.alias = {
+        ...config.resolve.alias,
+        "sharp$": false,
+        "onnxruntime-node$": false,
+    }
+    
     return config;
   },
   onDemandEntries: {
