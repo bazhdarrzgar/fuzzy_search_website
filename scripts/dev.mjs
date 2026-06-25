@@ -29,8 +29,8 @@ async function startDev() {
   // Set NODE_OPTIONS for memory increase cross-platform
   process.env.NODE_OPTIONS = '--max-old-space-size=512';
   
-  // Use 'npm' or 'yarn' based on what's available, or just run next directly via npx
-  const nextDev = spawn('npx', ['next', 'dev', '--hostname', '0.0.0.0', '--port', port.toString()], {
+  // Use nubx to run next dev
+  const nextDev = spawn('nubx', ['next', 'dev', '--hostname', '0.0.0.0', '--port', port.toString()], {
     stdio: 'inherit',
     shell: true,
     env: process.env

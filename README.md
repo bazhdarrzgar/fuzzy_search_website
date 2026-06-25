@@ -41,22 +41,20 @@ NEXT_PUBLIC_BASE_URL=http://localhost:3000
 
 2. **Run the Application**
 
-The platform includes a cross-platform launcher for both Windows and Linux.
+The platform includes cross-platform launchers for both Windows and Linux to run in either Development or Production (Build) mode.
 
-**Windows:**
-1. Open the `Run` folder.
-2. Double-click `install_requirements.bat` (only the first time).
-3. Double-click `launcher.bat` to open the Control Panel.
+**Development Mode:**
+* **Windows**: Run `Run\launcher.bat` to start the Control Panel.
+* **Linux**: Run `./Run/launcher.sh` to start the Control Panel.
 
-**Linux:**
-1. Open the terminal in the project directory.
-2. Run `./Run/install_requirements.sh` (only the first time).
-3. Run `./Run/launcher.sh` to open the Control Panel.
+**Production (Build) Mode:**
+* **Windows**: Run `Run\launcher_build.bat` to build the app and start the production server.
+* **Linux**: Run `./Run/launcher_build.sh` to build the app and start the production server.
 
 Alternatively, you can use the standard commands:
 ```bash
-npm install
-npm run dev
+nub install
+nub run dev
 ```
 
 Open http://localhost:3000 (or the port shown in the Control Panel)
@@ -289,10 +287,10 @@ When applying a saved view that references a different file, the UI prompts you 
 ### **Local Development**
 ```bash
 # Install dependencies
-yarn install
+nub install
 
 # Start development server
-yarn dev
+nub run dev
 
 # The app will be available at http://localhost:3000
 ```

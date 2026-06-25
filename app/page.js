@@ -996,8 +996,8 @@ export default function App() {
   const onDragEnd = (event) => { const { active: act, over } = event; if (!over || act.id === over.id) return; const oldIndex = visibleColumns.indexOf(act.id); const newIndex = visibleColumns.indexOf(over.id); if (oldIndex === -1 || newIndex === -1) return; setVisibleColumns(prev => arrayMove(prev, oldIndex, newIndex)) }
 
   return (
-    <div className="w-full px-4 py-4 theme-transition">
-      <Card className="mb-6 theme-transition">
+    <div className="w-full px-2 py-3 theme-transition">
+      <Card className="mb-3 theme-transition">
         <CardHeader>
           <div className="flex flex-col gap-6">
             {/* Title Section */}
@@ -1432,10 +1432,10 @@ export default function App() {
             </div>
           </div>
         </CardHeader>
-        <CardContent onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
+        <CardContent className="px-2 pb-4" onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
           <Tabs value={mainTab} onValueChange={setMainTab} className="w-full">
-            <div className="flex justify-center mb-6">
-              <TabsList className="grid w-full max-w-md grid-cols-2">
+            <div className="flex justify-start mb-4">
+              <TabsList className="grid grid-cols-2 w-80">
                 <TabsTrigger value="single">Single File Search</TabsTrigger>
                 <TabsTrigger value="global">Global Search</TabsTrigger>
               </TabsList>
@@ -1517,7 +1517,7 @@ export default function App() {
                                 <span className="text-xs text-muted-foreground font-normal">({sheet.matches.length} matches)</span>
                               </h3>
                               <div className="border rounded-md overflow-hidden bg-background">
-                                <div className="max-h-[500px] overflow-auto">
+                                <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
                                   <table className="w-full text-sm">
                                     <thead className="bg-muted sticky top-0 z-10">
                                       <tr>
@@ -1571,8 +1571,8 @@ export default function App() {
             </TabsContent>
 
             <TabsContent value="single" className="mt-0">
-              <div className="flex flex-col lg:flex-row gap-6">
-                <div className="flex-1 min-w-0 order-2 lg:order-1">
+              <div className="flex flex-col lg:flex-row gap-4">
+                <div className="flex-1 min-w-0 order-2 lg:order-1 overflow-hidden">
                   {loadedFiles.length === 0 ? (
                     <div className="border border-dashed rounded-lg p-12 flex flex-col items-center justify-center text-center bg-muted/30">
                       <FileUp className="h-10 w-10 mb-4 text-muted-foreground"/>
@@ -1773,7 +1773,7 @@ export default function App() {
                 <TabsList className="flex-wrap">{sheets.map(s => (<TabsTrigger key={s.name} value={s.name}>{s.name}</TabsTrigger>))}</TabsList>
                 {sheets.map(s => (
                   <TabsContent key={s.name} value={s.name} className="mt-4">
-                    <div className="overflow-auto border rounded-md">
+                    <div className="overflow-auto border rounded-md" style={{ maxHeight: 'calc(100vh - 260px)' }}>
                       <table className="w-full text-sm" style={{ tableLayout: 'auto' }}>
                         <thead className="bg-muted sticky top-0 z-10">
                           <tr>
@@ -1791,7 +1791,7 @@ export default function App() {
                         </thead>
                       </table>
                       {virtualizeEnabled ? (
-                        <div ref={bodyContainerRef} className="overflow-auto" style={{ height: 'calc(100vh - 280px)' }}>
+                        <div ref={bodyContainerRef} className="overflow-auto" style={{ height: 'calc(100vh - 260px)' }}>
                           <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
                             {rowVirtualizer.getVirtualItems().map(vi => { const row = sorted[vi.index]; const globalIdx = vi.index; return (
                               <div key={vi.key} style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vi.start}px)` }}>
@@ -1831,7 +1831,7 @@ export default function App() {
                           </div>
                         </div>
                       ) : (
-                        <div className="overflow-auto">
+                        <div className="overflow-x-auto">
                           <table className="w-full text-sm" style={{ tableLayout: 'auto' }}>
                             <tbody>
                               {pageRows.map((row, idx) => { const globalIdx = (page - 1) * PAGE_SIZE + idx; return (
@@ -2138,7 +2138,7 @@ export default function App() {
                 </div>
 
                 {/* Sidebar for loaded files tree */}
-                <div className="w-full lg:w-72 shrink-0 order-1 lg:order-2">
+                <div className="w-full lg:w-64 shrink-0 order-1 lg:order-2">
                   <Card className="sticky top-4">
                     <CardHeader className="pb-3 px-4">
                       <CardTitle className="text-base flex justify-between items-center">

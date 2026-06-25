@@ -1,4 +1,4 @@
 @echo off
 echo Starting Fuzzy Search Control Panel...
-node scripts/launcher.mjs
+nub scripts/launcher.mjs
 pause

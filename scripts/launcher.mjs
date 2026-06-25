@@ -194,8 +194,8 @@ const server = http.createServer(async (req, res) => {
     if (!devProcess) {
       projectLogs = ["Starting Next.js..."];
       hasOpenedBrowser = false;
-      // Use npm run dev which now calls our cross-platform scripts/dev.mjs
-      devProcess = spawn('npm', ['run', 'dev'], { 
+      // Use nub run dev which now calls our cross-platform scripts/dev.mjs
+      devProcess = spawn('nub', ['run', 'dev'], { 
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: process.platform !== 'win32'
